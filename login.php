@@ -1,38 +1,51 @@
 <?php
 session_start();
 
+// Обработка выхода из системы
+if (isset($_GET['logout']) && $_GET['logout'] == 1) {
+    // Удаляем токен из сессии
+    $_SESSION['token'] = '';
+    // Перенаправляем на страницу авторизации
+    header("Location: login.php");
+    exit;
+}
+
 $db = new PDO('mysql:host=localhost; dbname=module; charset=utf8', 
 'root', 
 null, 
 [PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
 
-// 1. Проверка наличия токена : локально ($_SESSION['token']) и сравнение с бд
-//                  Если есть -> перекидываем на странцу пользователя / админа
-//                  Если нет -> остаёмся на этой странице
+// 1. Проверка авторизации
+// Если пользователь не авторизован (нет или не правильный токен) -> на страницу login
+// Если тип пользователя = admin -> на страницу admin
+// Если тип пользователя = user -> остаемся на этой странице
 
-$_SESSION['token'] = '';
-
-// Проверка : существует ли токен и что он не пустой
-if (isset($_SESSION['token']) && !empty($_SESSION['token'])) {
+// Проверяем наличие токена в сессии
+if (!isset($_SESSION['token']) || empty($_SESSION['token'])) {
+    // Пользователь не авторизован, оставляем на странице login
+} else {
+    // Пользователь авторизован, проверяем тип
     $token = $_SESSION['token'];
-    //
-    $user = $db->query("SELECT id, type FROM users WHERE token = '$token'")->fetchALL();
+    $user = $db->query("SELECT id, type FROM users WHERE token = '$token'")->fetch();
     
-    if (!empty($user)) {
-        $userType = $user[0]['type'];
-        $isAdmin = $userType == 'admin';
-        $isUser = $userType == 'user';
-        
-        if ($isAdmin) {
+    // Если токен неверный или не найден в БД
+    if (!$user) {
+        // Сбрасываем токен
+        $_SESSION['token'] = '';
+    } else {
+        // Проверяем тип пользователя
+        if ($user['type'] === 'admin') {
+            // Если admin - перенаправляем на страницу admin
             header('Location: admin.php');
             exit;
-        }
-        if ($isUser) {
+        } else if ($user['type'] === 'user') {
+            // Если user - перенаправляем на страницу user
             header('Location: user.php');
             exit;
         }
     }
 }
+
 //  Проверака логина и пароля с БД , запись токена в БД, редирект
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // 1. Получить отправленные данные (логин и пароль)
@@ -76,7 +89,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 }
 ?>
 
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -88,20 +100,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 </head>
 <body>
     <div class="login">
-        <form method="POST">
+        <form method="POST" action="login.php">
             <h1>Авторизация</h1>
             <label for="login">
                 Введите логин
-                <span class="error">Необходимо заполнить</span>
+                <?php if(isset($error) && empty($login)): ?><span class="error">Необходимо заполнить</span><?php endif; ?>
             </label>
-            <input type="text" name="login" id="login">
+            <input type="text" name="login" id="login" >
             <label for="password">
                 Введите пароль
-                <span class="error">Необходимо заполнить</span>
+                <?php if(isset($error) && empty($password)): ?><span class="error">Необходимо заполнить</span><?php endif; ?>
             </label>
-            <input type="text" name="password" id="password">
+            <input type="password" name="password" id="password" >
             <button type="submit">Войти</button>
-            <p class="error">Неверный логин или пароль</p>
+            <?php if(isset($error)): ?><p class="error"><?php echo $error; ?></p><?php endif; ?>
         </form>
     </div>
 </body>
