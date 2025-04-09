@@ -61,29 +61,54 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         // 3. Сравнить с данными в БД
         // Если совпали -> генерируем токен, записываем в сессию и бд, редирект
         // Если нет -> Ошибка : неверный логин или пароль
-        $user = $db->query("SELECT id, password, type FROM users WHERE login = '$login'")->fetch();
+        $user = $db->query("SELECT id, password, type, amountAttempt, blocked FROM users WHERE login = '$login'")->fetch();
         
-        if ($user && $user['password'] === $password) {
-            // Генерируем токен
-            $token = bin2hex(random_bytes(16));
-            
-            // Записываем токен в сессию
-            $_SESSION['token'] = $token;
-            
-            // Записываем токен в БД
-            $userId = $user['id'];
-            $db->query("UPDATE users SET token = '$token' WHERE id = $userId");
-            
-            // Редирект в зависимости от типа пользователя
-            if ($user['type'] === 'admin') {
-                header('Location: admin.php');
-                exit;
-            } else {
-                header('Location: user.php');
-                exit;
-            }
+        // Проверяем, не заблокирован ли пользователь
+        if ($user && $user['blocked'] == 1) {
+            $error = 'Пользователь заблокирован. Обратитесь к администратору.';
         } else {
-            $error = 'Неверный логин или пароль';
+            if ($user && $user['password'] === $password) {
+                // Успешный вход - сбрасываем количество попыток
+                $userId = $user['id'];
+                $db->query("UPDATE users SET amountAttempt = 0 WHERE id = $userId");
+                
+                // Генерируем токен
+                $token = bin2hex(random_bytes(16));
+                
+                // Записываем токен в сессию
+                $_SESSION['token'] = $token;
+                
+                // Записываем токен в БД и обновляем время последней активности
+                $currentTime = date('Y-m-d H:i:s');
+                $db->query("UPDATE users SET token = '$token', latest = '$currentTime' WHERE id = $userId");
+                
+                // Редирект в зависимости от типа пользователя
+                if ($user['type'] === 'admin') {
+                    header('Location: admin.php');
+                    exit;
+                } else {
+                    header('Location: user.php');
+                    exit;
+                }
+            } else {
+                // Неуспешный вход
+                if ($user) {
+                    // Увеличиваем количество попыток
+                    $userId = $user['id'];
+                    $newAttempts = ($user['amountAttempt'] ?? 0) + 1;
+                    $db->query("UPDATE users SET amountAttempt = $newAttempts WHERE id = $userId");
+                    
+                    // Если попыток больше 3, блокируем пользователя
+                    if ($newAttempts > 3) {
+                        $db->query("UPDATE users SET blocked = 1 WHERE id = $userId");
+                        $error = 'Пользователь заблокирован. Обратитесь к администратору.';
+                    } else {
+                        $error = 'Неверный логин или пароль. Осталось попыток: ' . (3 - $newAttempts);
+                    }
+                } else {
+                    $error = 'Неверный логин или пароль';
+                }
+            }
         }
     }
 }
@@ -95,8 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="styles/style.css">
-    <title>Авторизация
-    </title>
+    <title>Авторизация</title>
 </head>
 <body>
     <div class="login">
